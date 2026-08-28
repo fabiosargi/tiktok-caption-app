@@ -48,18 +48,4 @@
         android:layout_marginTop="16dp"
         android:text="Salvar" />
 
-    <TextView
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="32dp"
-        android:text="Permissão de Acessibilidade"
-        android:textSize="16sp"
-        android:paddingBottom="8dp" />
-
-    <Button
-        android:id="@+id/btnOpenAccessibility"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Abrir configurações de Acessibilidade" />
-
 </LinearLayout>
