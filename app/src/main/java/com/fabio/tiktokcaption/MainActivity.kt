@@ -178,6 +178,7 @@ class MainActivity : AppCompatActivity() {
         statusText.text = "Lendo vídeo e gerando legenda com a IA..."
 
         Thread {
+            var audioFile: java.io.File? = null
             try {
                 val bytes = try {
                     contentResolver.openInputStream(uri)?.use { it.readBytes() }
@@ -193,7 +194,27 @@ class MainActivity : AppCompatActivity() {
                     return@Thread
                 }
 
-                GeminiClient.generateCaption(apiKey, bytes) { result ->
+                // Só o áudio importa pra gerar a legenda (o cenário ao fundo não entra
+                // no texto), então extraímos só a trilha de áudio pra mandar pro Gemini —
+                // fica bem mais barato em tokens e mais rápido que o vídeo inteiro. Se a
+                // extração falhar por algum motivo, cai pra mandar o vídeo completo mesmo.
+                audioFile = try {
+                    AudioExtractor.extractAudioTrack(this, uri)
+                } catch (e: Exception) {
+                    null
+                }
+
+                val mediaBytes: ByteArray
+                val mimeType: String
+                if (audioFile != null) {
+                    mediaBytes = audioFile.readBytes()
+                    mimeType = "audio/mp4"
+                } else {
+                    mediaBytes = bytes
+                    mimeType = "video/mp4"
+                }
+
+                GeminiClient.generateCaption(apiKey, mediaBytes, mimeType) { result ->
                     runOnUiThread {
                         btnPublish.isEnabled = true
                         result.onSuccess { caption ->
@@ -222,6 +243,8 @@ class MainActivity : AppCompatActivity() {
                     btnPublish.isEnabled = true
                     statusText.text = "Erro inesperado ao processar o vídeo: ${t.message ?: t.javaClass.simpleName}"
                 }
+            } finally {
+                audioFile?.delete()
             }
         }.start()
     }
