@@ -61,14 +61,58 @@
         app:layout_constraintStart_toStartOf="parent" />
 
     <TextView
+        android:id="@+id/scheduleLabel"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="20dp"
+        android:text="Quando publicar"
+        android:textColor="#FFFFFF"
+        android:textSize="16sp"
+        app:layout_constraintTop_toBottomOf="@id/btnRefresh"
+        app:layout_constraintStart_toStartOf="parent" />
+
+    <TextView
+        android:id="@+id/scheduleStatusText"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:text="Publica assim que a IA terminar de gerar"
+        android:textColor="#CCCCCC"
+        android:textSize="14sp"
+        app:layout_constraintTop_toBottomOf="@id/scheduleLabel"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toStartOf="@id/btnCancelSchedule" />
+
+    <TextView
+        android:id="@+id/btnCancelSchedule"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:text="Cancelar"
+        android:textColor="#E53935"
+        android:textSize="14sp"
+        android:visibility="gone"
+        app:layout_constraintTop_toBottomOf="@id/scheduleLabel"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <Button
+        android:id="@+id/btnSchedule"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="Escolher dia e horário"
+        app:layout_constraintTop_toBottomOf="@id/scheduleStatusText"
+        app:layout_constraintStart_toStartOf="parent" />
+
+    <TextView
         android:id="@+id/statusText"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:layout_marginTop="24dp"
+        android:layout_marginTop="20dp"
         android:textColor="#4CAF50"
         android:textSize="15sp"
         android:text=""
-        app:layout_constraintTop_toBottomOf="@id/btnRefresh"
+        app:layout_constraintTop_toBottomOf="@id/btnSchedule"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
 
