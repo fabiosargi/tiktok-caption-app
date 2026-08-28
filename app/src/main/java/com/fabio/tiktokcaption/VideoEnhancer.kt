@@ -16,9 +16,15 @@ import java.io.File
 
 /**
  * Aplica um tratamento leve de qualidade no vídeo antes de publicar — mais
- * contraste e saturação, pra sempre sair "melhorzinho" sem exagerar — usando o
- * processamento de vídeo do próprio Android (Media3 Transformer), direto no
- * aparelho, sem mandar o vídeo pra nenhum servidor externo pra isso.
+ * contraste e um toque de saturação, pra sempre sair "melhorzinho" sem exagerar —
+ * usando o processamento de vídeo do próprio Android (Media3 Transformer), direto
+ * no aparelho, sem mandar o vídeo pra nenhum servidor externo pra isso.
+ *
+ * Os valores de saturação/luminosidade abaixo foram reduzidos depois que o
+ * ambiente com luz quente (lâmpada amarela/incandescente ligada à noite) saiu
+ * com a pele vermelha/alaranjada demais — ambientes com luz quente já têm um
+ * viés natural pro laranja/vermelho, e empurrar a saturação pra cima só piora
+ * esse efeito. Por isso o reforço agora é bem mais sutil.
  *
  * Essa etapa roda em PARALELO com a geração da legenda: as duas começam assim que
  * a gravação termina, e a publicação só acontece depois que as duas tiverem prontas
@@ -51,10 +57,10 @@ object VideoEnhancer {
                 Effects(
                     /* audioProcessors= */ emptyList(),
                     /* videoEffects= */ listOf(
-                        Contrast(0.18f),
+                        Contrast(0.12f),
                         HslAdjustment.Builder()
-                            .adjustSaturation(28f)
-                            .adjustLightness(6f)
+                            .adjustSaturation(10f)
+                            .adjustLightness(2f)
                             .build()
                     )
                 )
