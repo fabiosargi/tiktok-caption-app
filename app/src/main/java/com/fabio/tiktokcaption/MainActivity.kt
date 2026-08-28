@@ -20,9 +20,12 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import java.io.File
+import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.atomic.AtomicInteger
 
 class MainActivity : AppCompatActivity() {
 
@@ -175,29 +178,80 @@ class MainActivity : AppCompatActivity() {
         }
 
         btnPublish.isEnabled = false
-        statusText.text = "Lendo vídeo e gerando legenda com a IA..."
+        hidePostButtons()
+        statusText.text = "Tratando o vídeo e gerando a legenda com IA..."
 
+        // O tratamento leve do vídeo e a extração de áudio + legenda pela IA rodam em
+        // paralelo: os dois começam assim que a gravação termina. Só quando AMBOS
+        // terminarem é que a gente publica, já usando o vídeo tratado junto com a
+        // legenda pronta — em vez de esperar um terminar pra começar o outro.
+        val pending = AtomicInteger(2)
+        var treatedVideoFile: File? = null
+        var originalBytes: ByteArray? = null
+        var captionResult: Result<String>? = null
+        var thumbnailBytes: ByteArray? = null
+
+        fun finishIfReady() {
+            if (pending.decrementAndGet() != 0) return
+            runOnUiThread {
+                btnPublish.isEnabled = true
+                val result = captionResult
+                val caption = result?.getOrNull()
+                if (caption == null) {
+                    statusText.text = "Erro ao gerar legenda: ${result?.exceptionOrNull()?.message ?: "erro desconhecido"}"
+                    return@runOnUiThread
+                }
+
+                prefs.edit().putString(Prefs.KEY_PENDING_CAPTION, caption).apply()
+                copyToClipboard(caption)
+                btnPostTikTok.visibility = View.VISIBLE
+                btnPostInstagram.visibility = View.VISIBLE
+                btnPostYouTube.visibility = View.VISIBLE
+
+                val videoBytes = treatedVideoFile?.let { file ->
+                    try { file.readBytes() } catch (e: Exception) { null }
+                } ?: originalBytes
+
+                if (videoBytes == null) {
+                    statusText.text = "Legenda pronta (copiada), mas não consegui ler o vídeo pra publicar."
+                    return@runOnUiThread
+                }
+
+                val postForMeKey = prefs.getString(Prefs.KEY_POSTFORME_API_KEY, null)
+                if (!postForMeKey.isNullOrBlank()) {
+                    statusText.text = "Legenda pronta. Publicando automaticamente..."
+                    publishAutomatically(postForMeKey, videoBytes, caption, thumbnailBytes)
+                } else {
+                    statusText.text = "Legenda pronta (também copiada). Escolha onde publicar:"
+                }
+            }
+        }
+
+        // 1) Tratamento leve de qualidade do vídeo (mais contraste e saturação), feito
+        // no próprio aparelho. Se falhar por qualquer motivo, seguimos com o original.
+        VideoEnhancer.enhance(this, uri) { result ->
+            treatedVideoFile = result.getOrNull()
+            finishIfReady()
+        }
+
+        // 2) Extração de áudio + legenda pela IA e, depois, a thumbnail com IA baseada
+        // nessa legenda — tudo em background, como já era antes.
         Thread {
-            var audioFile: java.io.File? = null
+            var audioFile: File? = null
             try {
                 val bytes = try {
                     contentResolver.openInputStream(uri)?.use { it.readBytes() }
                 } catch (e: Exception) {
                     null
                 }
+                originalBytes = bytes
 
                 if (bytes == null) {
-                    runOnUiThread {
-                        btnPublish.isEnabled = true
-                        statusText.text = "Não consegui ler o arquivo de vídeo"
-                    }
+                    captionResult = Result.failure(IOException("Não consegui ler o arquivo de vídeo"))
+                    finishIfReady()
                     return@Thread
                 }
 
-                // Só o áudio importa pra gerar a legenda (o cenário ao fundo não entra
-                // no texto), então extraímos só a trilha de áudio pra mandar pro Gemini —
-                // fica bem mais barato em tokens e mais rápido que o vídeo inteiro. Se a
-                // extração falhar por algum motivo, cai pra mandar o vídeo completo mesmo.
                 audioFile = try {
                     AudioExtractor.extractAudioTrack(this, uri)
                 } catch (e: Exception) {
@@ -215,34 +269,24 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 GeminiClient.generateCaption(apiKey, mediaBytes, mimeType) { result ->
-                    runOnUiThread {
-                        btnPublish.isEnabled = true
-                        result.onSuccess { caption ->
-                            prefs.edit().putString(Prefs.KEY_PENDING_CAPTION, caption).apply()
-                            copyToClipboard(caption)
-                            btnPostTikTok.visibility = View.VISIBLE
-                            btnPostInstagram.visibility = View.VISIBLE
-                            btnPostYouTube.visibility = View.VISIBLE
-
-                            val postForMeKey = prefs.getString(Prefs.KEY_POSTFORME_API_KEY, null)
-                            if (!postForMeKey.isNullOrBlank()) {
-                                statusText.text = "Legenda pronta. Publicando automaticamente..."
-                                publishAutomatically(postForMeKey, bytes, caption)
-                            } else {
-                                statusText.text = "Legenda pronta (também copiada). Escolha onde publicar:"
-                            }
-                        }.onFailure { error ->
-                            statusText.text = "Erro ao gerar legenda: ${error.message}"
+                    captionResult = result
+                    val caption = result.getOrNull()
+                    if (caption != null) {
+                        // A thumbnail depende do texto da legenda, então só começa depois
+                        // que ela fica pronta — mas não trava a publicação se falhar.
+                        GeminiClient.generateThumbnail(apiKey, caption) { thumbResult ->
+                            thumbnailBytes = thumbResult.getOrNull()
+                            finishIfReady()
                         }
+                    } else {
+                        finishIfReady()
                     }
                 }
             } catch (t: Throwable) {
                 // Rede de segurança: qualquer falha inesperada (inclusive falta de memória)
                 // vira uma mensagem na tela em vez de fechar o app sozinho.
-                runOnUiThread {
-                    btnPublish.isEnabled = true
-                    statusText.text = "Erro inesperado ao processar o vídeo: ${t.message ?: t.javaClass.simpleName}"
-                }
+                captionResult = Result.failure(t)
+                finishIfReady()
             } finally {
                 audioFile?.delete()
             }
@@ -250,13 +294,19 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Publicação automática via Post for Me: usa o vídeo e a legenda que o Gemini já
-     * gerou e publica direto nas contas conectadas, sem precisar abrir cada app.
-     * Os botões manuais continuam disponíveis como alternativa, caso algo falhe aqui.
+     * Publicação automática via Post for Me: usa o vídeo (já tratado, se o tratamento
+     * deu certo), a legenda e a thumbnail (se o Gemini gerou uma) e publica direto nas
+     * contas conectadas, sem precisar abrir cada app. Os botões manuais continuam
+     * disponíveis como alternativa, caso algo falhe aqui.
      */
-    private fun publishAutomatically(apiKey: String, videoBytes: ByteArray, caption: String) {
+    private fun publishAutomatically(
+        apiKey: String,
+        videoBytes: ByteArray,
+        caption: String,
+        thumbnailBytes: ByteArray?
+    ) {
         try {
-            PostForMeClient.publishVideo(apiKey, videoBytes, caption) { result ->
+            PostForMeClient.publishVideo(apiKey, videoBytes, caption, thumbnailBytes) { result ->
                 runOnUiThread {
                     result.onSuccess { publishResult ->
                         val platforms = publishResult.publishedPlatforms.joinToString(", ")
