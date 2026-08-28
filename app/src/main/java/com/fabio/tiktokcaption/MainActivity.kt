@@ -198,16 +198,42 @@ class MainActivity : AppCompatActivity() {
                     result.onSuccess { caption ->
                         prefs.edit().putString(Prefs.KEY_PENDING_CAPTION, caption).apply()
                         copyToClipboard(caption)
-                        statusText.text = "Legenda pronta (também copiada). Escolha onde publicar:"
                         btnPostTikTok.visibility = View.VISIBLE
                         btnPostInstagram.visibility = View.VISIBLE
                         btnPostYouTube.visibility = View.VISIBLE
+
+                        val postForMeKey = prefs.getString(Prefs.KEY_POSTFORME_API_KEY, null)
+                        if (!postForMeKey.isNullOrBlank()) {
+                            statusText.text = "Legenda pronta. Publicando automaticamente..."
+                            publishAutomatically(postForMeKey, bytes, caption)
+                        } else {
+                            statusText.text = "Legenda pronta (também copiada). Escolha onde publicar:"
+                        }
                     }.onFailure { error ->
                         statusText.text = "Erro ao gerar legenda: ${error.message}"
                     }
                 }
             }
         }.start()
+    }
+
+    /**
+     * Publicação automática via Post for Me: usa o vídeo e a legenda que o Gemini já
+     * gerou e publica direto nas contas conectadas, sem precisar abrir cada app.
+     * Os botões manuais continuam disponíveis como alternativa, caso algo falhe aqui.
+     */
+    private fun publishAutomatically(apiKey: String, videoBytes: ByteArray, caption: String) {
+        PostForMeClient.publishVideo(apiKey, videoBytes, caption) { result ->
+            runOnUiThread {
+                result.onSuccess { publishResult ->
+                    val platforms = publishResult.publishedPlatforms.joinToString(", ")
+                    statusText.text = "Publicado automaticamente em: $platforms ✅"
+                }.onFailure { error ->
+                    statusText.text = "Legenda pronta (copiada), mas a publicação automática falhou: " +
+                        "${error.message}. Publique manualmente:"
+                }
+            }
+        }
     }
 
     private fun hidePostButtons() {
