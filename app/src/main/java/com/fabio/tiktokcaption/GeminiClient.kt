@@ -27,7 +27,7 @@ import java.util.concurrent.TimeUnit
 object GeminiClient {
 
     private const val MODEL = "gemini-3.6-flash"
-    private const val IMAGE_MODEL = "gemini-3.6-flash-image"
+    private const val IMAGE_MODEL = "gemini-3.1-flash-image"
     private const val BASE_URL = "https://generativelanguage.googleapis.com"
     private const val UPLOAD_URL = "$BASE_URL/upload/v1beta/files"
     private const val GENERATE_URL = "$BASE_URL/v1beta/models/$MODEL:generateContent"
