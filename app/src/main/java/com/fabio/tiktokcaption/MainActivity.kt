@@ -178,40 +178,49 @@ class MainActivity : AppCompatActivity() {
         statusText.text = "Lendo vídeo e gerando legenda com a IA..."
 
         Thread {
-            val bytes = try {
-                contentResolver.openInputStream(uri)?.use { it.readBytes() }
-            } catch (e: Exception) {
-                null
-            }
-
-            if (bytes == null) {
-                runOnUiThread {
-                    btnPublish.isEnabled = true
-                    statusText.text = "Não consegui ler o arquivo de vídeo"
+            try {
+                val bytes = try {
+                    contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                } catch (e: Exception) {
+                    null
                 }
-                return@Thread
-            }
 
-            GeminiClient.generateCaption(apiKey, bytes) { result ->
+                if (bytes == null) {
+                    runOnUiThread {
+                        btnPublish.isEnabled = true
+                        statusText.text = "Não consegui ler o arquivo de vídeo"
+                    }
+                    return@Thread
+                }
+
+                GeminiClient.generateCaption(apiKey, bytes) { result ->
+                    runOnUiThread {
+                        btnPublish.isEnabled = true
+                        result.onSuccess { caption ->
+                            prefs.edit().putString(Prefs.KEY_PENDING_CAPTION, caption).apply()
+                            copyToClipboard(caption)
+                            btnPostTikTok.visibility = View.VISIBLE
+                            btnPostInstagram.visibility = View.VISIBLE
+                            btnPostYouTube.visibility = View.VISIBLE
+
+                            val postForMeKey = prefs.getString(Prefs.KEY_POSTFORME_API_KEY, null)
+                            if (!postForMeKey.isNullOrBlank()) {
+                                statusText.text = "Legenda pronta. Publicando automaticamente..."
+                                publishAutomatically(postForMeKey, bytes, caption)
+                            } else {
+                                statusText.text = "Legenda pronta (também copiada). Escolha onde publicar:"
+                            }
+                        }.onFailure { error ->
+                            statusText.text = "Erro ao gerar legenda: ${error.message}"
+                        }
+                    }
+                }
+            } catch (t: Throwable) {
+                // Rede de segurança: qualquer falha inesperada (inclusive falta de memória)
+                // vira uma mensagem na tela em vez de fechar o app sozinho.
                 runOnUiThread {
                     btnPublish.isEnabled = true
-                    result.onSuccess { caption ->
-                        prefs.edit().putString(Prefs.KEY_PENDING_CAPTION, caption).apply()
-                        copyToClipboard(caption)
-                        btnPostTikTok.visibility = View.VISIBLE
-                        btnPostInstagram.visibility = View.VISIBLE
-                        btnPostYouTube.visibility = View.VISIBLE
-
-                        val postForMeKey = prefs.getString(Prefs.KEY_POSTFORME_API_KEY, null)
-                        if (!postForMeKey.isNullOrBlank()) {
-                            statusText.text = "Legenda pronta. Publicando automaticamente..."
-                            publishAutomatically(postForMeKey, bytes, caption)
-                        } else {
-                            statusText.text = "Legenda pronta (também copiada). Escolha onde publicar:"
-                        }
-                    }.onFailure { error ->
-                        statusText.text = "Erro ao gerar legenda: ${error.message}"
-                    }
+                    statusText.text = "Erro inesperado ao processar o vídeo: ${t.message ?: t.javaClass.simpleName}"
                 }
             }
         }.start()
@@ -223,15 +232,22 @@ class MainActivity : AppCompatActivity() {
      * Os botões manuais continuam disponíveis como alternativa, caso algo falhe aqui.
      */
     private fun publishAutomatically(apiKey: String, videoBytes: ByteArray, caption: String) {
-        PostForMeClient.publishVideo(apiKey, videoBytes, caption) { result ->
-            runOnUiThread {
-                result.onSuccess { publishResult ->
-                    val platforms = publishResult.publishedPlatforms.joinToString(", ")
-                    statusText.text = "Publicado automaticamente em: $platforms ✅"
-                }.onFailure { error ->
-                    statusText.text = "Legenda pronta (copiada), mas a publicação automática falhou: " +
-                        "${error.message}. Publique manualmente:"
+        try {
+            PostForMeClient.publishVideo(apiKey, videoBytes, caption) { result ->
+                runOnUiThread {
+                    result.onSuccess { publishResult ->
+                        val platforms = publishResult.publishedPlatforms.joinToString(", ")
+                        statusText.text = "Publicado automaticamente em: $platforms ✅"
+                    }.onFailure { error ->
+                        statusText.text = "Legenda pronta (copiada), mas a publicação automática falhou: " +
+                            "${error.message}. Publique manualmente:"
+                    }
                 }
+            }
+        } catch (t: Throwable) {
+            runOnUiThread {
+                statusText.text = "Legenda pronta (copiada), mas a publicação automática falhou: " +
+                    "${t.message ?: t.javaClass.simpleName}. Publique manualmente:"
             }
         }
     }
