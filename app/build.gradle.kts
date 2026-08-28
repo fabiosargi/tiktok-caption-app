@@ -52,7 +52,7 @@ dependencies {
 
     // Tratamento leve de qualidade de vídeo (contraste/saturação) direto no
     // aparelho, rodando em paralelo com a geração da legenda pela IA.
-    val media3Version = "1.11.0"
+    val media3Version = "1.4.1"
     implementation("androidx.media3:media3-common:$media3Version")
     implementation("androidx.media3:media3-effect:$media3Version")
     implementation("androidx.media3:media3-transformer:$media3Version")
