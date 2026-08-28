@@ -1,8 +1,6 @@
 package com.fabio.tiktokcaption
 
-import android.content.Intent
 import android.os.Bundle
-import android.provider.Settings
 import android.widget.Button
 import android.widget.EditText
 import android.widget.Toast
@@ -29,10 +27,6 @@ class SettingsActivity : AppCompatActivity() {
         findViewById<Button>(R.id.btnSavePostForMeKey).setOnClickListener {
             prefs.edit().putString(Prefs.KEY_POSTFORME_API_KEY, editPostForMeKey.text.toString().trim()).apply()
             Toast.makeText(this, "Chave do Post for Me salva", Toast.LENGTH_SHORT).show()
-        }
-
-        findViewById<Button>(R.id.btnOpenAccessibility).setOnClickListener {
-            startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
         }
     }
 }
