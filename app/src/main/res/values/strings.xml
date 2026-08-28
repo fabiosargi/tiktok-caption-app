@@ -1,5 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Legenda Automática</string>
-    <string name="accessibility_service_description">Permite colar automaticamente a legenda gerada pela IA no campo de descrição do TikTok.</string>
 </resources>
