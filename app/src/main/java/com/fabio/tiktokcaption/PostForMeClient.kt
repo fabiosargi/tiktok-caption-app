@@ -14,15 +14,21 @@ import java.util.concurrent.TimeUnit
 
 /**
  * Cliente para a API do Post for Me (postforme.dev) — depois que a legenda já foi
- * gerada pelo Gemini, este cliente sobe o vídeo e publica automaticamente nas contas
- * (TikTok, Instagram, YouTube) que você conectou no painel deles. Sem precisar abrir
- * cada aplicativo manualmente nem passar por auditoria própria em cada plataforma.
+ * gerada pelo Gemini, este cliente sobe o vídeo (e a thumbnail, se tiver uma pronta)
+ * e publica automaticamente nas contas (TikTok, Instagram, YouTube) que você conectou
+ * no painel deles. Sem precisar abrir cada aplicativo manualmente nem passar por
+ * auditoria própria em cada plataforma.
  *
  * Fluxo (conforme a documentação oficial em api.postforme.dev/docs):
  * 1. POST /v1/media/create-upload-url -> devolve upload_url (assinada) e media_url
- * 2. PUT dos bytes do vídeo na upload_url
+ *    (usado tanto pro vídeo quanto pra imagem da thumbnail, quando houver)
+ * 2. PUT dos bytes na upload_url
  * 3. GET /v1/social-accounts -> lista as contas conectadas (filtra tiktok/instagram/youtube)
- * 4. POST /v1/social-posts com a legenda + media_url + ids das contas -> publica na hora
+ * 4. POST /v1/social-posts com a legenda + media_url (+ thumbnail_url, se houver) + ids
+ *    das contas -> publica na hora
+ *
+ * A thumbnail é só um "extra": se a geração ou o upload dela falhar por qualquer
+ * motivo, a publicação do vídeo segue normalmente, só que sem a capa personalizada.
  */
 object PostForMeClient {
 
@@ -43,6 +49,7 @@ object PostForMeClient {
         apiKey: String,
         videoBytes: ByteArray,
         caption: String,
+        thumbnailBytes: ByteArray? = null,
         callback: (Result<PublishResult>) -> Unit
     ) {
         getConnectedAccounts(apiKey) { accountsResult ->
@@ -54,16 +61,25 @@ object PostForMeClient {
                     return@onSuccess
                 }
 
-                requestUploadUrl(apiKey) { uploadResult ->
-                    uploadResult.onSuccess { (uploadUrl, mediaUrl) ->
-                        uploadBytes(uploadUrl, videoBytes) { putResult ->
-                            putResult.onSuccess {
-                                createPost(apiKey, caption, mediaUrl, accounts.map { it.id }) { postResult ->
+                uploadMedia(apiKey, videoBytes, "video/mp4") { videoUploadResult ->
+                    videoUploadResult.onSuccess { videoUrl ->
+                        if (thumbnailBytes == null) {
+                            createPost(apiKey, caption, videoUrl, null, accounts.map { it.id }) { postResult ->
+                                postResult.onSuccess {
+                                    callback(Result.success(PublishResult(accounts.map { it.platform })))
+                                }.onFailure { callback(Result.failure(it)) }
+                            }
+                        } else {
+                            // Se a thumbnail falhar ao subir, publica mesmo assim sem ela —
+                            // isso nunca deve travar a publicação do vídeo em si.
+                            uploadMedia(apiKey, thumbnailBytes, "image/png") { thumbUploadResult ->
+                                val thumbnailUrl = thumbUploadResult.getOrNull()
+                                createPost(apiKey, caption, videoUrl, thumbnailUrl, accounts.map { it.id }) { postResult ->
                                     postResult.onSuccess {
                                         callback(Result.success(PublishResult(accounts.map { it.platform })))
                                     }.onFailure { callback(Result.failure(it)) }
                                 }
-                            }.onFailure { callback(Result.failure(it)) }
+                            }
                         }
                     }.onFailure { callback(Result.failure(it)) }
                 }
@@ -141,10 +157,36 @@ object PostForMeClient {
         })
     }
 
-    private fun uploadBytes(uploadUrl: String, bytes: ByteArray, callback: (Result<Unit>) -> Unit) {
+    /**
+     * Sobe quaisquer bytes de mídia (vídeo ou imagem) pro Post for Me e devolve a
+     * media_url pronta pra usar num post. Reaproveitado tanto pro vídeo quanto pra
+     * imagem da thumbnail.
+     */
+    private fun uploadMedia(
+        apiKey: String,
+        bytes: ByteArray,
+        mimeType: String,
+        callback: (Result<String>) -> Unit
+    ) {
+        requestUploadUrl(apiKey) { uploadResult ->
+            uploadResult.onSuccess { (uploadUrl, mediaUrl) ->
+                uploadBytes(uploadUrl, bytes, mimeType) { putResult ->
+                    putResult.onSuccess { callback(Result.success(mediaUrl)) }
+                        .onFailure { callback(Result.failure(it)) }
+                }
+            }.onFailure { callback(Result.failure(it)) }
+        }
+    }
+
+    private fun uploadBytes(
+        uploadUrl: String,
+        bytes: ByteArray,
+        mimeType: String,
+        callback: (Result<Unit>) -> Unit
+    ) {
         val request = Request.Builder()
             .url(uploadUrl)
-            .put(bytes.toRequestBody("video/mp4".toMediaType()))
+            .put(bytes.toRequestBody(mimeType.toMediaType()))
             .build()
 
         client.newCall(request).enqueue(object : Callback {
@@ -155,7 +197,7 @@ object PostForMeClient {
             override fun onResponse(call: Call, response: Response) {
                 response.use {
                     if (!it.isSuccessful) {
-                        callback(Result.failure(IOException("Erro ao enviar o vídeo (HTTP ${it.code})")))
+                        callback(Result.failure(IOException("Erro ao enviar mídia (HTTP ${it.code})")))
                     } else {
                         callback(Result.success(Unit))
                     }
@@ -168,10 +210,15 @@ object PostForMeClient {
         apiKey: String,
         caption: String,
         mediaUrl: String,
+        thumbnailUrl: String?,
         accountIds: List<String>,
         callback: (Result<Unit>) -> Unit
     ) {
-        val mediaArray = JSONArray().put(JSONObject().put("url", mediaUrl))
+        val mediaItem = JSONObject().put("url", mediaUrl)
+        if (thumbnailUrl != null) {
+            mediaItem.put("thumbnail_url", thumbnailUrl)
+        }
+        val mediaArray = JSONArray().put(mediaItem)
         val accountsArray = JSONArray()
         accountIds.forEach { accountsArray.put(it) }
 
