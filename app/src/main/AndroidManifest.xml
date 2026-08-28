@@ -23,7 +23,7 @@
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
-        android:label="Legenda TikTok"
+        android:label="Legenda Automática"
         android:theme="@style/Theme.TikTokCaption"
         android:usesCleartextTraffic="false">
 
