@@ -41,6 +41,16 @@ class MainActivity : AppCompatActivity() {
 
     private var latestVideoUri: Uri? = null
 
+    // Preenchidos quando o tratamento do vídeo + legenda + thumbnail ficam prontos.
+    // Só são usados quando o usuário toca em "Publicar" — a publicação automática
+    // nunca dispara sozinha, assim sempre dá pra conferir antes de ir pro ar.
+    private var pendingVideoBytes: ByteArray? = null
+    private var pendingCaption: String? = null
+    private var pendingThumbnailBytes: ByteArray? = null
+    private var readyToPublish = false
+
+    private val prefs by lazy { getSharedPreferences(Prefs.NAME, MODE_PRIVATE) }
+
     // Cada plataforma abre com o mesmo vídeo + a mesma legenda gerada uma única vez.
     // "com.zhiliaoapp.musically"/"com.ss.android.ugc.trill" = TikTok, "com.instagram.android" = Instagram,
     // "com.google.android.youtube" = YouTube. Sem token/API oficial: é o Compartilhar padrão do Android,
@@ -64,7 +74,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     // Chamado quando volta da tela de gravação: pega o vídeo recém-gravado e já
-    // manda gerar a legenda automaticamente, sem precisar de outro toque.
+    // manda gerar a legenda automaticamente, sem precisar de outro toque. A
+    // publicação em si continua exigindo confirmação manual depois.
     private val recordLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -97,7 +108,9 @@ class MainActivity : AppCompatActivity() {
             recordLauncher.launch(Intent(this, RecordActivity::class.java))
         }
         btnRefresh.setOnClickListener { checkPermissionAndLoad() }
-        btnPublish.setOnClickListener { generateCaption() }
+        btnPublish.setOnClickListener {
+            if (readyToPublish) publishNow() else generateCaption()
+        }
         btnSettings.setOnClickListener {
             startActivity(Intent(this, SettingsActivity::class.java))
         }
@@ -169,7 +182,6 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        val prefs = getSharedPreferences(Prefs.NAME, MODE_PRIVATE)
         val apiKey = prefs.getString(Prefs.KEY_API_KEY, null)
         if (apiKey.isNullOrBlank()) {
             Toast.makeText(this, "Configure sua chave do Gemini primeiro", Toast.LENGTH_LONG).show()
@@ -177,14 +189,19 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
+        readyToPublish = false
+        pendingVideoBytes = null
+        pendingCaption = null
+        pendingThumbnailBytes = null
         btnPublish.isEnabled = false
+        btnPublish.text = "Gerando..."
         hidePostButtons()
         statusText.text = "Tratando o vídeo e gerando a legenda com IA..."
 
         // O tratamento leve do vídeo e a extração de áudio + legenda pela IA rodam em
         // paralelo: os dois começam assim que a gravação termina. Só quando AMBOS
-        // terminarem é que a gente publica, já usando o vídeo tratado junto com a
-        // legenda pronta — em vez de esperar um terminar pra começar o outro.
+        // terminarem é que os dados ficam prontos pra publicar — em vez de esperar
+        // um terminar pra começar o outro.
         val pending = AtomicInteger(2)
         var treatedVideoFile: File? = null
         var originalBytes: ByteArray? = null
@@ -194,10 +211,11 @@ class MainActivity : AppCompatActivity() {
         fun finishIfReady() {
             if (pending.decrementAndGet() != 0) return
             runOnUiThread {
-                btnPublish.isEnabled = true
                 val result = captionResult
                 val caption = result?.getOrNull()
                 if (caption == null) {
+                    btnPublish.isEnabled = true
+                    btnPublish.text = "Gerar legenda com IA"
                     statusText.text = "Erro ao gerar legenda: ${result?.exceptionOrNull()?.message ?: "erro desconhecido"}"
                     return@runOnUiThread
                 }
@@ -207,35 +225,45 @@ class MainActivity : AppCompatActivity() {
                 btnPostTikTok.visibility = View.VISIBLE
                 btnPostInstagram.visibility = View.VISIBLE
                 btnPostYouTube.visibility = View.VISIBLE
+                btnPublish.isEnabled = true
 
                 val videoBytes = treatedVideoFile?.let { file ->
                     try { file.readBytes() } catch (e: Exception) { null }
                 } ?: originalBytes
 
                 if (videoBytes == null) {
+                    btnPublish.text = "Gerar legenda com IA"
                     statusText.text = "Legenda pronta (copiada), mas não consegui ler o vídeo pra publicar."
                     return@runOnUiThread
                 }
 
                 val postForMeKey = prefs.getString(Prefs.KEY_POSTFORME_API_KEY, null)
                 if (!postForMeKey.isNullOrBlank()) {
-                    statusText.text = "Legenda pronta. Publicando automaticamente..."
-                    publishAutomatically(postForMeKey, videoBytes, caption, thumbnailBytes)
+                    pendingVideoBytes = videoBytes
+                    pendingCaption = caption
+                    pendingThumbnailBytes = thumbnailBytes
+                    readyToPublish = true
+                    btnPublish.text = "Publicar automaticamente"
+                    statusText.text = "Tudo pronto! Confira a legenda" +
+                        (if (thumbnailBytes != null) " e a thumbnail" else "") +
+                        " e toque em Publicar quando quiser postar."
                 } else {
+                    btnPublish.text = "Gerar legenda com IA"
                     statusText.text = "Legenda pronta (também copiada). Escolha onde publicar:"
                 }
             }
         }
 
         // 1) Tratamento leve de qualidade do vídeo (mais contraste e saturação), feito
-        // no próprio aparelho. Se falhar por qualquer motivo, seguimos com o original.
+        // no próprio aparelho. Se falhar por qualquer motivo (inclusive se sair mais
+        // curto que o original), seguimos com o vídeo original.
         VideoEnhancer.enhance(this, uri) { result ->
             treatedVideoFile = result.getOrNull()
             finishIfReady()
         }
 
         // 2) Extração de áudio + legenda pela IA e, depois, a thumbnail com IA baseada
-        // nessa legenda — tudo em background, como já era antes.
+        // nessa legenda — tudo em background.
         Thread {
             var audioFile: File? = null
             try {
@@ -273,9 +301,16 @@ class MainActivity : AppCompatActivity() {
                     val caption = result.getOrNull()
                     if (caption != null) {
                         // A thumbnail depende do texto da legenda, então só começa depois
-                        // que ela fica pronta — mas não trava a publicação se falhar.
+                        // que ela fica pronta — mas não trava a publicação se falhar. O
+                        // título que aparece por cima da imagem também sai dessa legenda.
                         GeminiClient.generateThumbnail(apiKey, caption) { thumbResult ->
-                            thumbnailBytes = thumbResult.getOrNull()
+                            thumbnailBytes = thumbResult.getOrNull()?.let { bytes ->
+                                try {
+                                    ThumbnailComposer.addTitleOverlay(bytes, caption)
+                                } catch (e: Exception) {
+                                    bytes
+                                }
+                            }
                             finishIfReady()
                         }
                     } else {
@@ -294,6 +329,23 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
+     * Chamado só quando o usuário toca em "Publicar", depois de já ter conferido a
+     * legenda (e a thumbnail, se veio uma). A publicação nunca dispara sozinha.
+     */
+    private fun publishNow() {
+        val caption = pendingCaption ?: return
+        val videoBytes = pendingVideoBytes ?: return
+        val postForMeKey = prefs.getString(Prefs.KEY_POSTFORME_API_KEY, null)
+        if (postForMeKey.isNullOrBlank()) return
+
+        readyToPublish = false
+        btnPublish.isEnabled = false
+        btnPublish.text = "Publicando..."
+        statusText.text = "Publicando..."
+        publishAutomatically(postForMeKey, videoBytes, caption, pendingThumbnailBytes)
+    }
+
+    /**
      * Publicação automática via Post for Me: usa o vídeo (já tratado, se o tratamento
      * deu certo), a legenda e a thumbnail (se o Gemini gerou uma) e publica direto nas
      * contas conectadas, sem precisar abrir cada app. Os botões manuais continuam
@@ -308,19 +360,26 @@ class MainActivity : AppCompatActivity() {
         try {
             PostForMeClient.publishVideo(apiKey, videoBytes, caption, thumbnailBytes) { result ->
                 runOnUiThread {
+                    btnPublish.isEnabled = true
                     result.onSuccess { publishResult ->
+                        btnPublish.text = "Gerar legenda com IA"
                         val platforms = publishResult.publishedPlatforms.joinToString(", ")
                         statusText.text = "Publicado automaticamente em: $platforms ✅"
                     }.onFailure { error ->
-                        statusText.text = "Legenda pronta (copiada), mas a publicação automática falhou: " +
-                            "${error.message}. Publique manualmente:"
+                        readyToPublish = true
+                        btnPublish.text = "Publicar automaticamente"
+                        statusText.text = "A publicação automática falhou: ${error.message}. " +
+                            "Toque em Publicar pra tentar de novo, ou publique manualmente:"
                     }
                 }
             }
         } catch (t: Throwable) {
             runOnUiThread {
-                statusText.text = "Legenda pronta (copiada), mas a publicação automática falhou: " +
-                    "${t.message ?: t.javaClass.simpleName}. Publique manualmente:"
+                btnPublish.isEnabled = true
+                readyToPublish = true
+                btnPublish.text = "Publicar automaticamente"
+                statusText.text = "A publicação automática falhou: ${t.message ?: t.javaClass.simpleName}. " +
+                    "Toque em Publicar pra tentar de novo, ou publique manualmente:"
             }
         }
     }
@@ -345,7 +404,6 @@ class MainActivity : AppCompatActivity() {
      * que nem todo app lê o EXTRA_TEXT pra pré-preencher o campo de descrição.
      */
     private fun openAppWithVideo(uri: Uri, packages: List<String>) {
-        val prefs = getSharedPreferences(Prefs.NAME, MODE_PRIVATE)
         val caption = prefs.getString(Prefs.KEY_PENDING_CAPTION, null)
 
         val sendIntent = Intent(Intent.ACTION_SEND).apply {
