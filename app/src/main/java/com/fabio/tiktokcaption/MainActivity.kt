@@ -55,7 +55,7 @@ class MainActivity : AppCompatActivity() {
     // Guardados só pra permitir tentar de novo manualmente (tocando no botão) se a
     // publicação automática falhar — a publicação em si já dispara sozinha assim
     // que o tratamento do vídeo + legenda + thumbnail terminam de ser gerados, sem
-    // precisar de nenhum toque extra.
+    // precisar de nenhum toque extra além do toque inicial em "Gerar legenda com IA".
     private var pendingVideoBytes: ByteArray? = null
     private var pendingCaption: String? = null
     private var pendingThumbnailBytes: ByteArray? = null
@@ -87,10 +87,12 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // Chamado quando volta da tela de gravação: pega o vídeo recém-gravado e já
-    // manda gerar a legenda automaticamente, sem precisar de outro toque. A
-    // publicação em si também dispara sozinha assim que tudo ficar pronto (ou é
-    // agendada, se você escolheu um dia/horário antes de gravar).
+    // Chamado quando volta da tela de gravação: só guarda o vídeo recém-gravado e
+    // deixa a tela pronta pra você escolher um dia/horário (se quiser) ANTES de
+    // tocar em "Gerar legenda com IA" — é esse toque que dispara tudo de uma vez
+    // (tratamento do vídeo, legenda pela IA e a publicação ou o agendamento no
+    // final), sem precisar de nenhum toque extra depois disso. Gerar sozinho aqui,
+    // sem esperar esse toque, não deixava tempo de escolher o horário antes.
     private val recordLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -98,9 +100,12 @@ class MainActivity : AppCompatActivity() {
             val uriString = result.data?.getStringExtra(RecordActivity.EXTRA_VIDEO_URI)
             if (uriString != null) {
                 latestVideoUri = Uri.parse(uriString)
-                videoInfoText.text = "Vídeo gravado agora — gerando legenda..."
+                videoInfoText.text = "Vídeo gravado agora"
                 hidePostButtons()
-                generateCaption()
+                awaitingRetry = false
+                btnPublish.isEnabled = true
+                btnPublish.text = "Gerar legenda com IA"
+                statusText.text = "Vídeo pronto. Se quiser, escolha o dia e horário antes de tocar em \"Gerar legenda com IA\"."
             }
         }
     }
@@ -284,9 +289,9 @@ class MainActivity : AppCompatActivity() {
         statusText.text = "Tratando o vídeo e gerando a legenda com IA..."
 
         // O tratamento leve do vídeo e a extração de áudio + legenda pela IA rodam em
-        // paralelo: os dois começam assim que a gravação termina. Só quando AMBOS
-        // terminarem é que os dados ficam prontos — e a publicação (ou o agendamento)
-        // dispara sozinha na hora, sem esperar nenhum toque extra.
+        // paralelo: os dois começam assim que você toca em "Gerar legenda com IA". Só
+        // quando AMBOS terminarem é que os dados ficam prontos — e a publicação (ou o
+        // agendamento) dispara sozinha na hora, sem esperar nenhum toque extra.
         val pending = AtomicInteger(2)
         var treatedVideoFile: File? = null
         var originalBytes: ByteArray? = null
