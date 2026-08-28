@@ -9,15 +9,23 @@ import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.face.FaceDetection
 import com.google.mlkit.vision.face.FaceDetector
 import com.google.mlkit.vision.face.FaceDetectorOptions
+import java.io.ByteArrayOutputStream
 
 /**
  * Escolhe, sem usar nenhuma IA generativa (só análise local no aparelho, de
- * graça e offline), o melhor instante do vídeo pra servir de capa.
+ * graça e offline), o melhor instante do vídeo pra servir de capa — e devolve
+ * também os bytes (PNG) desse frame já extraído, prontos pra usar como imagem
+ * de thumbnail (com ou sem texto por cima).
  *
  * Isso existe por causa de uma limitação do TikTok: a API deles não aceita subir
  * uma imagem de capa customizada — só deixa escolher um recorte (timestamp) de
  * dentro do próprio vídeo. Sem isso, o TikTok pegaria sempre o frame 0, que pode
  * ser bem no meio de uma piscada ou uma careta.
+ *
+ * A mesma escolha de frame também serve pra Instagram/YouTube: em vez de uma
+ * imagem desenhada por IA generativa (que pode sair sem nenhuma relação com o
+ * vídeo), a thumbnail dessas plataformas usa esse mesmo frame real, só com um
+ * texto curto por cima (ver ThumbnailComposer).
  *
  * A técnica: varre alguns pontos espaçados pelo vídeo (evitando bem o início e o
  * fim), roda a detecção de rosto do ML Kit (100% no aparelho) em cada um e
@@ -35,11 +43,14 @@ object FrameSelector {
 
     private const val CANDIDATE_COUNT = 8
 
-    fun pickBestTimestampMs(context: Context, uri: Uri): Long? {
+    /** Timestamp (ms) e os bytes PNG do frame vencedor, já prontos pra usar como thumbnail. */
+    data class BestFrame(val timestampMs: Long, val pngBytes: ByteArray)
+
+    fun pickBestFrame(context: Context, uri: Uri): BestFrame? {
         val retriever = MediaMetadataRetriever()
         return try {
             retriever.setDataSource(context, uri)
-            pickBestTimestampMs(retriever)
+            pickBestFrameInternal(retriever)
         } catch (e: Exception) {
             null
         } finally {
@@ -47,11 +58,11 @@ object FrameSelector {
         }
     }
 
-    fun pickBestTimestampMs(path: String): Long? {
+    fun pickBestFrame(path: String): BestFrame? {
         val retriever = MediaMetadataRetriever()
         return try {
             retriever.setDataSource(path)
-            pickBestTimestampMs(retriever)
+            pickBestFrameInternal(retriever)
         } catch (e: Exception) {
             null
         } finally {
@@ -59,7 +70,7 @@ object FrameSelector {
         }
     }
 
-    private fun pickBestTimestampMs(retriever: MediaMetadataRetriever): Long? {
+    private fun pickBestFrameInternal(retriever: MediaMetadataRetriever): BestFrame? {
         val durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
             ?.toLongOrNull()
         if (durationMs == null || durationMs <= 0) return null
@@ -81,6 +92,7 @@ object FrameSelector {
 
             var bestTimestampMs: Long? = null
             var bestScore = Double.NEGATIVE_INFINITY
+            var bestBitmap: Bitmap? = null
 
             for (i in 0 until CANDIDATE_COUNT) {
                 val timestampMs = start + step * i
@@ -92,16 +104,29 @@ object FrameSelector {
 
                 val score = try {
                     scoreFrame(bitmap, detector)
-                } finally {
-                    bitmap.recycle()
+                } catch (e: Exception) {
+                    null
                 }
 
                 if (score != null && score > bestScore) {
                     bestScore = score
                     bestTimestampMs = timestampMs
+                    bestBitmap?.recycle()
+                    bestBitmap = bitmap
+                } else {
+                    bitmap.recycle()
                 }
             }
-            return bestTimestampMs
+
+            val timestamp = bestTimestampMs ?: return null
+            val winningBitmap = bestBitmap ?: return null
+            return try {
+                val output = ByteArrayOutputStream()
+                winningBitmap.compress(Bitmap.CompressFormat.PNG, 100, output)
+                BestFrame(timestamp, output.toByteArray())
+            } finally {
+                winningBitmap.recycle()
+            }
         } finally {
             try { detector.close() } catch (e: Exception) { }
         }
