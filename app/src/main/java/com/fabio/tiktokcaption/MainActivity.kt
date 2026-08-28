@@ -289,13 +289,21 @@ class MainActivity : AppCompatActivity() {
     /**
      * Abre o app de destino já com o vídeo anexado, usando o Compartilhar padrão do Android
      * (o mesmo mecanismo que qualquer app de galeria usa) — sem precisar de API oficial nem
-     * de app registrado em nenhuma das plataformas. A legenda é colada automaticamente pelo
-     * CaptionAccessibilityService assim que a tela de descrição daquele app aparecer.
+     * de app registrado em nenhuma das plataformas. Manda a legenda junto via EXTRA_TEXT: os
+     * apps que aceitam texto compartilhado (a maioria) já abrem com a descrição preenchida;
+     * de qualquer forma ela também fica copiada na área de transferência como reforço, já
+     * que nem todo app lê o EXTRA_TEXT pra pré-preencher o campo de descrição.
      */
     private fun openAppWithVideo(uri: Uri, packages: List<String>) {
+        val prefs = getSharedPreferences(Prefs.NAME, MODE_PRIVATE)
+        val caption = prefs.getString(Prefs.KEY_PENDING_CAPTION, null)
+
         val sendIntent = Intent(Intent.ACTION_SEND).apply {
             type = "video/*"
             putExtra(Intent.EXTRA_STREAM, uri)
+            if (!caption.isNullOrBlank()) {
+                putExtra(Intent.EXTRA_TEXT, caption)
+            }
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
 
