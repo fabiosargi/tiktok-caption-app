@@ -56,4 +56,9 @@ dependencies {
     implementation("androidx.media3:media3-common:$media3Version")
     implementation("androidx.media3:media3-effect:$media3Version")
     implementation("androidx.media3:media3-transformer:$media3Version")
+
+    // Detecção de rosto 100% no aparelho (sem IA generativa, sem custo de API) —
+    // usada só pra escolher analiticamente o melhor instante do vídeo pra servir
+    // de capa no TikTok (olhos abertos, sem careta no meio de uma fala).
+    implementation("com.google.mlkit:face-detection:16.1.7")
 }
