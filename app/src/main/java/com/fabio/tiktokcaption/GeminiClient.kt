@@ -85,7 +85,7 @@ object GeminiClient {
         val prompt = "Crie uma imagem de thumbnail/capa para um vídeo de rede social (TikTok, " +
             "Instagram, YouTube), no formato vertical, bem chamativa, com cores vibrantes e alto " +
             "contraste, estilo que prenda a atenção e gere cliques (like uma boa thumbnail de " +
-            "YouTube Shorts), sobre o seguinte assunto: "$caption". Não inclua texto ilegível " +
+            "YouTube Shorts), sobre o seguinte assunto: \"$caption\". Não inclua texto ilegível " +
             "nem marcas d'água, e não tente reescrever a legenda dentro da imagem."
 
         val content = JSONObject().put("parts", JSONArray().put(JSONObject().put("text", prompt)))
