@@ -22,9 +22,10 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="v1.1"
-                android:textColor="#666666"
-                android:textSize="12sp" />
+                android:text="v1.2"
+                android:textColor="#4CAF50"
+                android:textStyle="bold"
+                android:textSize="13sp" />
 
             <ImageButton
                 android:id="@+id/btnSettings"
