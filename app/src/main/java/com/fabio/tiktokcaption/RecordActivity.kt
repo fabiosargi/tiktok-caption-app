@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.ContentValues
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.hardware.camera2.CaptureRequest
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -15,7 +16,10 @@ import android.widget.ImageButton
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.OptIn
 import androidx.appcompat.app.AppCompatActivity
+import androidx.camera.camera2.interop.Camera2Interop
+import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
@@ -92,6 +96,7 @@ class RecordActivity : AppCompatActivity() {
         ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
     }
 
+    @OptIn(ExperimentalCamera2Interop::class)
     private fun startCamera() {
         val providerFuture = ProcessCameraProvider.getInstance(this)
         providerFuture.addListener({
@@ -108,7 +113,21 @@ class RecordActivity : AppCompatActivity() {
             val recorder = Recorder.Builder()
                 .setQualitySelector(qualitySelector)
                 .build()
-            videoCapture = VideoCapture.withOutput(recorder)
+
+            // Liga a estabilização de vídeo nativa do Android (a mesma tecnologia
+            // que o app de Câmera padrão usa) direto na captura — sem processamento
+            // extra depois de gravar. Se o aparelho não suportar esse modo, o
+            // Android simplesmente ignora a opção; nunca trava a gravação por isso.
+            val videoCaptureBuilder = VideoCapture.Builder(recorder)
+            try {
+                Camera2Interop.Extender(videoCaptureBuilder).setCaptureRequestOption(
+                    CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE,
+                    CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON
+                )
+            } catch (e: Exception) {
+                // Segue sem estabilização se não for suportado nesse aparelho.
+            }
+            videoCapture = videoCaptureBuilder.build()
 
             try {
                 provider.unbindAll()
