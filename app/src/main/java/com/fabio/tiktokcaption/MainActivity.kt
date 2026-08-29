@@ -430,17 +430,24 @@ class MainActivity : AppCompatActivity() {
                     mimeType = "video/mp4"
                 }
 
+                // O upload pro Gemini é assíncrono (roda em callback do OkHttp): a chamada
+                // abaixo só DISPARA o upload e volta na hora, ela não espera terminar. Por
+                // isso o áudio só pode ser apagado DEPOIS que o resultado voltar aqui dentro
+                // do callback — apagar logo em seguida (como um "finally" fazia antes) apagava
+                // o arquivo antes do OkHttp terminar de ler ele do disco pra subir, e dava
+                // erro de arquivo não encontrado (ENOENT) na hora de gerar a legenda.
                 GeminiClient.generateCaption(apiKey, mediaFile, mimeType) { result ->
                     captionResult = result
+                    audioFile?.delete()
                     finishIfReady()
                 }
             } catch (t: Throwable) {
                 // Rede de segurança: qualquer falha inesperada (inclusive falta de memória)
-                // vira uma mensagem na tela em vez de fechar o app sozinho.
+                // vira uma mensagem na tela em vez de fechar o app sozinho. Se a falha
+                // aconteceu antes do upload começar, é seguro apagar o áudio aqui.
                 captionResult = Result.failure(t)
-                finishIfReady()
-            } finally {
                 audioFile?.delete()
+                finishIfReady()
             }
         }.start()
     }
