@@ -56,7 +56,7 @@ class MainActivity : AppCompatActivity() {
     // publicação automática falhar — a publicação em si já dispara sozinha assim
     // que o tratamento do vídeo + legenda + thumbnail terminam de ser gerados, sem
     // precisar de nenhum toque extra além do toque inicial em "Gerar legenda com IA".
-    private var pendingVideoBytes: ByteArray? = null
+    private var pendingVideoFile: File? = null
     private var pendingCaption: String? = null
     private var pendingThumbnailBytes: ByteArray? = null
     private var pendingThumbnailTimestampMs: Long? = null
@@ -273,7 +273,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         awaitingRetry = false
-        pendingVideoBytes = null
+        pendingVideoFile = null
         pendingCaption = null
         pendingThumbnailBytes = null
         pendingThumbnailTimestampMs = null
@@ -294,7 +294,7 @@ class MainActivity : AppCompatActivity() {
         // agendamento) dispara sozinha na hora, sem esperar nenhum toque extra.
         val pending = AtomicInteger(2)
         var treatedVideoFile: File? = null
-        var originalBytes: ByteArray? = null
+        var originalVideoFile: File? = null
         var captionResult: Result<String>? = null
         var bestFrame: FrameSelector.BestFrame? = null
 
@@ -333,11 +333,15 @@ class MainActivity : AppCompatActivity() {
                 btnPostInstagram.visibility = View.VISIBLE
                 btnPostYouTube.visibility = View.VISIBLE
 
-                val videoBytes = treatedVideoFile?.let { file ->
-                    try { file.readBytes() } catch (e: Exception) { null }
-                } ?: originalBytes
+                // Nunca lemos o vídeo inteiro pra memória aqui — é exatamente isso que
+                // causava o OutOfMemoryError ("Failed to allocate ... byte allocation")
+                // que às vezes aparecia na segunda geração seguida: o vídeo tratado e o
+                // original, cada um podendo ter dezenas/centenas de MB, ficavam os dois
+                // como ByteArray na RAM ao mesmo tempo. Agora só passamos o arquivo em si
+                // adiante, e o upload lê ele aos poucos direto do disco.
+                val videoFile = treatedVideoFile ?: originalVideoFile
 
-                if (videoBytes == null) {
+                if (videoFile == null) {
                     btnPublish.isEnabled = true
                     btnPublish.text = "Gerar e publicar automaticamente"
                     statusText.text = "Legenda pronta (copiada), mas não consegui ler o vídeo pra publicar."
@@ -352,7 +356,7 @@ class MainActivity : AppCompatActivity() {
                     return@runOnUiThread
                 }
 
-                pendingVideoBytes = videoBytes
+                pendingVideoFile = videoFile
                 pendingCaption = caption
                 pendingThumbnailBytes = thumbBytes
                 pendingThumbnailTimestampMs = frame?.timestampMs
@@ -362,7 +366,7 @@ class MainActivity : AppCompatActivity() {
                 btnPublish.text = if (scheduledMillis != null) "Agendando..." else "Publicando..."
                 statusText.text = if (scheduledMillis != null) "Agendando a publicação..." else "Publicando automaticamente..."
 
-                publishAutomatically(postForMeKey, videoBytes, caption, thumbBytes, frame?.timestampMs, scheduledMillis)
+                publishAutomatically(postForMeKey, videoFile, caption, thumbBytes, frame?.timestampMs, scheduledMillis)
             }
         }
 
@@ -396,14 +400,15 @@ class MainActivity : AppCompatActivity() {
         Thread {
             var audioFile: File? = null
             try {
-                val bytes = try {
-                    contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                } catch (e: Exception) {
-                    null
-                }
-                originalBytes = bytes
+                // Copia o vídeo original pro cache aos poucos (buffer pequeno), sem
+                // nunca montar ele inteiro como ByteArray na memória — antes isso lia
+                // o vídeo inteiro pra RAM sempre, mesmo quando a extração de áudio
+                // funcionava e ele nem era usado, o que podia estourar a memória do
+                // aparelho num vídeo grande (era a causa do OutOfMemoryError).
+                val videoFile = copyUriToCacheFile(uri)
+                originalVideoFile = videoFile
 
-                if (bytes == null) {
+                if (videoFile == null) {
                     captionResult = Result.failure(IOException("Não consegui ler o arquivo de vídeo"))
                     finishIfReady()
                     return@Thread
@@ -415,17 +420,17 @@ class MainActivity : AppCompatActivity() {
                     null
                 }
 
-                val mediaBytes: ByteArray
+                val mediaFile: File
                 val mimeType: String
                 if (audioFile != null) {
-                    mediaBytes = audioFile.readBytes()
+                    mediaFile = audioFile
                     mimeType = "audio/mp4"
                 } else {
-                    mediaBytes = bytes
+                    mediaFile = videoFile
                     mimeType = "video/mp4"
                 }
 
-                GeminiClient.generateCaption(apiKey, mediaBytes, mimeType) { result ->
+                GeminiClient.generateCaption(apiKey, mediaFile, mimeType) { result ->
                     captionResult = result
                     finishIfReady()
                 }
@@ -440,10 +445,36 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
+    /**
+     * Copia o conteúdo do vídeo (via Uri) pra um arquivo temporário no cache aos
+     * poucos, com um buffer pequeno de cada vez — nunca monta o vídeo inteiro
+     * como ByteArray na memória. Isso é o que evita o OutOfMemoryError que podia
+     * acontecer ao ler um vídeo grande inteiro pra RAM (às vezes até duas vezes
+     * ao mesmo tempo: o original e o já tratado).
+     */
+    private fun copyUriToCacheFile(uri: Uri): File? {
+        return try {
+            val file = File.createTempFile("video_original_", ".mp4", cacheDir)
+            val input = contentResolver.openInputStream(uri)
+            if (input == null) {
+                file.delete()
+                return null
+            }
+            input.use { inStream ->
+                file.outputStream().use { outStream ->
+                    inStream.copyTo(outStream)
+                }
+            }
+            file
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     /** Tenta publicar de novo com os mesmos dados já gerados, depois de uma falha. */
     private fun retryPublish() {
         val caption = pendingCaption ?: return
-        val videoBytes = pendingVideoBytes ?: return
+        val videoFile = pendingVideoFile ?: return
         val postForMeKey = prefs.getString(Prefs.KEY_POSTFORME_API_KEY, null)
         if (postForMeKey.isNullOrBlank()) return
 
@@ -452,7 +483,7 @@ class MainActivity : AppCompatActivity() {
         btnPublish.isEnabled = false
         btnPublish.text = if (scheduledMillis != null) "Agendando..." else "Publicando..."
         statusText.text = "Tentando de novo..."
-        publishAutomatically(postForMeKey, videoBytes, caption, pendingThumbnailBytes, pendingThumbnailTimestampMs, scheduledMillis)
+        publishAutomatically(postForMeKey, videoFile, caption, pendingThumbnailBytes, pendingThumbnailTimestampMs, scheduledMillis)
     }
 
     /**
@@ -466,7 +497,7 @@ class MainActivity : AppCompatActivity() {
      */
     private fun publishAutomatically(
         apiKey: String,
-        videoBytes: ByteArray,
+        videoFile: File,
         caption: String,
         thumbnailBytes: ByteArray?,
         thumbnailTimestampMs: Long?,
@@ -478,7 +509,7 @@ class MainActivity : AppCompatActivity() {
         }
         try {
             PostForMeClient.publishVideo(
-                apiKey, videoBytes, caption, thumbnailBytes, thumbnailTimestampMs, scheduledAtIso
+                apiKey, videoFile, caption, thumbnailBytes, thumbnailTimestampMs, scheduledAtIso
             ) { result ->
                 runOnUiThread {
                     btnPublish.isEnabled = true
