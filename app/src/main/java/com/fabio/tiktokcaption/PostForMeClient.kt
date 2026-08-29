@@ -5,10 +5,12 @@ import okhttp3.Callback
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 
@@ -65,7 +67,7 @@ object PostForMeClient {
 
     fun publishVideo(
         apiKey: String,
-        videoBytes: ByteArray,
+        videoFile: File,
         caption: String,
         thumbnailBytes: ByteArray? = null,
         thumbnailTimestampMs: Long? = null,
@@ -81,7 +83,11 @@ object PostForMeClient {
                     return@onSuccess
                 }
 
-                uploadMedia(apiKey, videoBytes, "video/mp4") { videoUploadResult ->
+                // O vídeo sobe direto do arquivo em disco (streaming), nunca como
+                // ByteArray inteiro na memória — evita o OutOfMemoryError que podia
+                // acontecer com vídeos grandes. A thumbnail (bem menor) continua
+                // como ByteArray normalmente.
+                uploadMediaFile(apiKey, videoFile, "video/mp4") { videoUploadResult ->
                     videoUploadResult.onSuccess { videoUrl ->
                         if (thumbnailBytes == null) {
                             createPost(
@@ -211,6 +217,55 @@ object PostForMeClient {
         val request = Request.Builder()
             .url(uploadUrl)
             .put(bytes.toRequestBody(mimeType.toMediaType()))
+            .build()
+
+        client.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                callback(Result.failure(e))
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                response.use {
+                    if (!it.isSuccessful) {
+                        callback(Result.failure(IOException("Erro ao enviar mídia (HTTP ${it.code})")))
+                    } else {
+                        callback(Result.success(Unit))
+                    }
+                }
+            }
+        })
+    }
+
+    /**
+     * Igual a uploadMedia, mas pra quando a mídia já está num arquivo em disco
+     * (o caso do vídeo) — assim o upload lê os bytes aos poucos direto do
+     * arquivo, em vez de exigir tudo já carregado num ByteArray na memória.
+     */
+    private fun uploadMediaFile(
+        apiKey: String,
+        file: File,
+        mimeType: String,
+        callback: (Result<String>) -> Unit
+    ) {
+        requestUploadUrl(apiKey) { uploadResult ->
+            uploadResult.onSuccess { (uploadUrl, mediaUrl) ->
+                uploadFile(uploadUrl, file, mimeType) { putResult ->
+                    putResult.onSuccess { callback(Result.success(mediaUrl)) }
+                        .onFailure { callback(Result.failure(it)) }
+                }
+            }.onFailure { callback(Result.failure(it)) }
+        }
+    }
+
+    private fun uploadFile(
+        uploadUrl: String,
+        file: File,
+        mimeType: String,
+        callback: (Result<Unit>) -> Unit
+    ) {
+        val request = Request.Builder()
+            .url(uploadUrl)
+            .put(file.asRequestBody(mimeType.toMediaType()))
             .build()
 
         client.newCall(request).enqueue(object : Callback {
