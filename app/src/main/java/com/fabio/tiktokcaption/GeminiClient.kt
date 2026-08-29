@@ -6,9 +6,11 @@ import okhttp3.Callback
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 
@@ -53,13 +55,13 @@ object GeminiClient {
 
     fun generateCaption(
         apiKey: String,
-        mediaBytes: ByteArray,
+        mediaFile: File,
         mimeType: String = "video/mp4",
         callback: (Result<String>) -> Unit
     ) {
-        startUpload(apiKey, mediaBytes, mimeType) { startResult ->
+        startUpload(apiKey, mediaFile, mimeType) { startResult ->
             startResult.onSuccess { uploadUrl ->
-                finishUpload(uploadUrl, mediaBytes) { finishResult ->
+                finishUpload(uploadUrl, mediaFile) { finishResult ->
                     finishResult.onSuccess { fileUri ->
                         waitUntilActive(apiKey, fileUri, 0) { activeResult ->
                             activeResult.onSuccess {
@@ -143,7 +145,7 @@ object GeminiClient {
 
     private fun startUpload(
         apiKey: String,
-        mediaBytes: ByteArray,
+        mediaFile: File,
         mimeType: String,
         callback: (Result<String>) -> Unit
     ) {
@@ -154,7 +156,7 @@ object GeminiClient {
             .url("$UPLOAD_URL?key=$apiKey")
             .addHeader("X-Goog-Upload-Protocol", "resumable")
             .addHeader("X-Goog-Upload-Command", "start")
-            .addHeader("X-Goog-Upload-Header-Content-Length", mediaBytes.size.toString())
+            .addHeader("X-Goog-Upload-Header-Content-Length", mediaFile.length().toString())
             .addHeader("X-Goog-Upload-Header-Content-Type", mimeType)
             .post(metadata)
             .build()
@@ -177,12 +179,15 @@ object GeminiClient {
         })
     }
 
-    private fun finishUpload(uploadUrl: String, mediaBytes: ByteArray, callback: (Result<String>) -> Unit) {
+    private fun finishUpload(uploadUrl: String, mediaFile: File, callback: (Result<String>) -> Unit) {
+        // Sobe direto do arquivo em disco (streaming), em vez de carregar a mídia
+        // inteira como ByteArray na memória primeiro — evita o OutOfMemoryError
+        // que podia acontecer com vídeos grandes.
         val request = Request.Builder()
             .url(uploadUrl)
             .addHeader("X-Goog-Upload-Offset", "0")
             .addHeader("X-Goog-Upload-Command", "upload, finalize")
-            .post(mediaBytes.toRequestBody(null))
+            .post(mediaFile.asRequestBody(null))
             .build()
 
         client.newCall(request).enqueue(object : Callback {
