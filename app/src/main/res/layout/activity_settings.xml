@@ -1,51 +1,77 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:padding="24dp">
-
-    <TextView
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Chave de API do Gemini (Google AI Studio)"
-        android:textSize="16sp"
-        android:paddingBottom="8dp" />
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:padding="24dp">
 
-    <EditText
-        android:id="@+id/editApiKey"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:inputType="textPassword"
-        android:hint="Cole sua chave aqui" />
+        <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Chave de API do Gemini (Google AI Studio)"
+                    android:textSize="16sp"
+                    android:paddingBottom="8dp" />
 
-    <Button
-        android:id="@+id/btnSaveKey"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="16dp"
-        android:text="Salvar" />
+        <EditText
+                    android:id="@+id/editApiKey"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="textPassword"
+                    android:hint="Cole sua chave aqui" />
 
-    <TextView
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="32dp"
-        android:text="Chave de API do Post for Me (publicação automática)"
-        android:textSize="16sp"
-        android:paddingBottom="8dp" />
+        <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:layout_marginTop="16dp">
 
-    <EditText
-        android:id="@+id/editPostForMeKey"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:inputType="textPassword"
-        android:hint="Cole a chave do postforme.dev aqui" />
+                    <Button
+                                    android:id="@+id/btnSaveKey"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="Salvar" />
 
-    <Button
-        android:id="@+id/btnSavePostForMeKey"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="16dp"
-        android:text="Salvar" />
+                    <Button
+                                    android:id="@+id/btnToggleApiKey"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginStart="8dp"
+                                    android:text="Mostrar" />
+        </LinearLayout>
+
+        <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="32dp"
+                    android:text="Chave de API do Post for Me (publicação automática)"
+                    android:textSize="16sp"
+                    android:paddingBottom="8dp" />
+
+        <EditText
+                    android:id="@+id/editPostForMeKey"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="textPassword"
+                    android:hint="Cole a chave do postforme.dev aqui" />
+
+        <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:layout_marginTop="16dp">
+
+                    <Button
+                                    android:id="@+id/btnSavePostForMeKey"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="Salvar" />
+
+                    <Button
+                                    android:id="@+id/btnTogglePostForMeKey"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginStart="8dp"
+                                    android:text="Mostrar" />
+        </LinearLayout>
 
 </LinearLayout>
