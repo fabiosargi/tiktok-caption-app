@@ -11,8 +11,8 @@ android {
         applicationId = "com.fabio.tiktokcaption"
         minSdk = 26
         targetSdk = 34
-        versionCode = 4
-        versionName = "1.3"
+        versionCode = 5
+        versionName = "1.4"
     }
 
     buildTypes {
@@ -38,6 +38,9 @@ android {
 dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.appcompat:appcompat:1.7.0")
+    // PickVisualMedia (seletor de foto/vídeo do sistema, sem precisar de permissão
+    // de armazenamento) — usado pra escolher um vídeo manual da galeria.
+    implementation("androidx.activity:activity-ktx:1.9.3")
     implementation("com.google.android.material:material:1.12.0")
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
 
